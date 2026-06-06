@@ -9,51 +9,46 @@
     body { background: #000; overflow: hidden; }
 
     #webcam {
-      position: fixed; bottom: 16px; right: 16px;
-      width: 160px; height: 120px;
-      border-radius: 10px;
-      opacity: 0.45;
+      position: fixed; bottom: 14px; right: 14px;
+      width: 140px; height: 105px;
+      border-radius: 8px; opacity: 0.5;
       transform: scaleX(-1);
-      border: 1px solid rgba(255, 130, 30, 0.25);
+      border: 1px solid rgba(255,130,30,0.2);
       pointer-events: none;
     }
-
     #hud {
-      position: fixed; top: 20px; left: 24px;
+      position: fixed; top: 18px; left: 22px;
       font: 700 11px/2.2 'Courier New', monospace;
-      color: rgba(255, 155, 50, 0.55);
+      color: rgba(255,155,50,0.5);
       letter-spacing: 0.12em;
       text-transform: uppercase;
       pointer-events: none;
     }
-
     #hint {
-      position: fixed; bottom: 22px; left: 50%;
+      position: fixed; bottom: 20px; left: 50%;
       transform: translateX(-50%);
       font: 11px 'Courier New', monospace;
-      color: rgba(255,255,255,0.15);
-      letter-spacing: 0.1em;
+      color: rgba(255,255,255,0.13);
+      letter-spacing: 0.09em;
       white-space: nowrap;
       pointer-events: none;
     }
-
     #loading {
       position: fixed; inset: 0;
       display: flex; align-items: center; justify-content: center;
-      flex-direction: column; gap: 12px;
-      background: #000;
-      font: 13px 'Courier New', monospace;
-      color: rgba(255,140,40,0.6);
+      flex-direction: column; gap: 14px;
+      background: #000; z-index: 99;
+      font: 12px 'Courier New', monospace;
+      color: rgba(255,140,40,0.65);
       letter-spacing: 0.1em;
-      z-index: 99;
-      transition: opacity 0.8s;
+      transition: opacity 0.7s;
     }
     .spinner {
-      width: 32px; height: 32px;
-      border: 2px solid rgba(255,120,30,0.2);
-      border-top-color: rgba(255,120,30,0.8);
+      width: 30px; height: 30px;
+      border: 2px solid rgba(255,110,20,0.15);
+      border-top-color: rgba(255,110,20,0.9);
       border-radius: 50%;
-      animation: spin 0.9s linear infinite;
+      animation: spin 0.85s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
@@ -62,7 +57,7 @@
 
 <div id="loading">
   <div class="spinner"></div>
-  <div id="load-text">Loading MediaPipe…</div>
+  <div id="load-text">Loading…</div>
 </div>
 
 <video id="webcam" autoplay playsinline muted></video>
@@ -71,56 +66,49 @@
   <span id="g-label">—</span><br>
   <span id="g-dist"></span>
 </div>
-<div id="hint">✊ 握拳拉远 · 🖐 张手靠近 · 🤚 旋转手掌</div>
+<div id="hint">✊ 握拳拉远 · 🖐 张手靠近 · 🤚 旋转</div>
 
-<!-- Three.js -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
-
-<!-- MediaPipe (CDN script, exposes globals: Hands, Camera) -->
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 
 <script>
 'use strict';
 
-// ═══════════════════════════════════════════════
-//  Renderer
-// ═══════════════════════════════════════════════
+// ── Renderer ──────────────────────────────────────────────────────
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
 document.body.prepend(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x010109);
+scene.background = new THREE.Color(0x000308);
 
-const cam = new THREE.PerspectiveCamera(52, window.innerWidth / window.innerHeight, 0.1, 600);
+const cam = new THREE.PerspectiveCamera(52, innerWidth / innerHeight, 0.1, 600);
 
 window.addEventListener('resize', () => {
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  cam.aspect = window.innerWidth / window.innerHeight;
+  renderer.setSize(innerWidth, innerHeight);
+  cam.aspect = innerWidth / innerHeight;
   cam.updateProjectionMatrix();
 });
 
-// ═══════════════════════════════════════════════
-//  Camera orbit
-// ═══════════════════════════════════════════════
-let camTheta  = 0.2;
-let camPhi    = 1.2;
-let camRadius = 20;
-const CAM_MIN = 8, CAM_MAX = 65;
+// ── Camera orbit ──────────────────────────────────────────────────
+let camTheta  = 0.25;
+let camPhi    = 1.25;
+let camRadius = 22;
+const CAM_MIN = 9, CAM_MAX = 70;
 
 function positionCam() {
-  const sinP = Math.sin(camPhi), cosP = Math.cos(camPhi);
-  const sinT = Math.sin(camTheta), cosT = Math.cos(camTheta);
-  cam.position.set(camRadius * sinP * cosT, camRadius * cosP, camRadius * sinP * sinT);
+  cam.position.set(
+    camRadius * Math.sin(camPhi) * Math.cos(camTheta),
+    camRadius * Math.cos(camPhi),
+    camRadius * Math.sin(camPhi) * Math.sin(camTheta)
+  );
   cam.lookAt(0, 0, 0);
 }
 positionCam();
 
-// ═══════════════════════════════════════════════
-//  Shared particle shader
-// ═══════════════════════════════════════════════
+// ── Shared shader ─────────────────────────────────────────────────
 const VERT = `
   attribute vec3  aCol;
   attribute float aSz;
@@ -128,7 +116,7 @@ const VERT = `
   void main(){
     vCol = aCol;
     vec4 mv = modelViewMatrix * vec4(position, 1.0);
-    gl_PointSize = aSz * (380.0 / -mv.z);
+    gl_PointSize = aSz * (420.0 / -mv.z);
     gl_Position  = projectionMatrix * mv;
   }
 `;
@@ -138,46 +126,43 @@ const FRAG = `
     vec2  uv = gl_PointCoord - 0.5;
     float d  = dot(uv, uv) * 4.0;
     if (d > 1.0) discard;
-    float a = pow(1.0 - d, 1.6) * 0.95;
+    float a  = pow(1.0 - d, 1.5) * 0.98;
     gl_FragColor = vec4(vCol, a);
   }
 `;
-function particleMat() {
-  return new THREE.ShaderMaterial({
-    transparent   : true,
-    depthWrite    : false,
-    blending      : THREE.AdditiveBlending,
-    vertexShader  : VERT,
-    fragmentShader: FRAG,
-  });
-}
-function makePoints(pos, col, siz, mat) {
+const sharedMat = new THREE.ShaderMaterial({
+  transparent   : true,
+  depthWrite    : false,
+  blending      : THREE.AdditiveBlending,
+  vertexShader  : VERT,
+  fragmentShader: FRAG,
+});
+
+function buildPoints(pos, col, siz) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('aCol',     new THREE.BufferAttribute(col, 3));
   geo.setAttribute('aSz',      new THREE.BufferAttribute(siz, 1));
-  return new THREE.Points(geo, mat || particleMat());
+  return new THREE.Points(geo, sharedMat);
 }
 
-// ═══════════════════════════════════════════════
-//  Planet
-// ═══════════════════════════════════════════════
-const PLANET_R = 5;
+// ── Planet ────────────────────────────────────────────────────────
+const PR = 5;   // planet radius
 let planetMesh;
 
-(function buildPlanet() {
-  const N   = 16000;
+(function () {
+  const N   = 22000;
   const pos = new Float32Array(N * 3);
   const col = new Float32Array(N * 3);
   const siz = new Float32Array(N);
 
   for (let i = 0; i < N; i++) {
-    // Radial distribution: dense shell + inner volume + thin haze
-    const t = Math.random();
+    const roll = Math.random();
     let r;
-    if      (t < 0.70) r = PLANET_R * (0.87 + Math.random() * 0.20);   // surface
-    else if (t < 0.90) r = PLANET_R * Math.pow(Math.random(), 0.5);     // interior
-    else               r = PLANET_R * (1.07 + Math.random() * 0.28);    // haze
+    // 82 % tightly on surface shell, 12 % interior, 6 % outer haze
+    if      (roll < 0.82) r = PR * (0.93 + Math.random() * 0.10);
+    else if (roll < 0.94) r = PR * (0.30 + Math.random() * 0.63);
+    else                  r = PR * (1.03 + Math.random() * 0.18);
 
     const u = Math.random() * 2 * Math.PI;
     const v = Math.acos(2 * Math.random() - 1);
@@ -185,83 +170,91 @@ let planetMesh;
     pos[i*3+1] = r * Math.cos(v);
     pos[i*3+2] = r * Math.sin(v) * Math.sin(u);
 
-    // Color ramp: deep magenta-red → orange → warm yellow-white at rim
-    const n = Math.min(r / PLANET_R, 1.3);
+    // Color: inner core = yellow-white, mid = bright orange, surface = deep orange
+    const n  = r / PR;                                  // 0 … ~1.2
     const rr = 1.0;
-    const gg = Math.pow(Math.max(0, n - 0.05), 0.55) * 0.62;
-    const bb = Math.max(0, n - 0.85) * 0.45;
-    col[i*3]   = rr;
-    col[i*3+1] = gg;
-    col[i*3+2] = bb;
+    const gg = n < 0.5 ? 0.85 - n * 0.5               // core: warm white
+             : Math.max(0.1, 0.85 - (n - 0.5) * 1.5); // surface: orange→dark
+    const bb = n < 0.4 ? 0.55 - n * 1.0 : 0.0;        // core bluish-white tint
 
-    const onSurface = t < 0.70;
-    siz[i] = onSurface ? (2.2 + Math.random() * 3.8) : (0.5 + Math.random() * 2.0);
+    const brightness = roll < 0.82 ? (0.75 + Math.random() * 0.25)
+                                   : (0.4  + Math.random() * 0.4);
+    col[i*3]   = rr * brightness;
+    col[i*3+1] = gg * brightness;
+    col[i*3+2] = bb * brightness;
+
+    // Surface particles larger, core smaller
+    siz[i] = roll < 0.82 ? (2.5 + Math.random() * 3.5)
+           : roll < 0.94  ? (1.0 + Math.random() * 2.0)
+           :                 (1.5 + Math.random() * 2.5);
   }
 
-  planetMesh = makePoints(pos, col, siz);
-  planetMesh.name = 'planet';
+  planetMesh = buildPoints(pos, col, siz);
   scene.add(planetMesh);
 })();
 
-// ── Atmosphere glow ──────────────────────────────
-{
-  const geo = new THREE.SphereGeometry(PLANET_R * 1.45, 32, 32);
+// ── Atmosphere ────────────────────────────────────────────────────
+for (const [scale, opacity, color] of [
+  [1.35, 0.06, 0xff4400],
+  [1.15, 0.10, 0xff6600],
+  [0.92, 0.09, 0xff2200],
+]) {
+  const geo = new THREE.SphereGeometry(PR * scale, 32, 32);
   const mat = new THREE.MeshBasicMaterial({
-    color: 0xff5500,
-    transparent: true,
-    opacity: 0.055,
-    side: THREE.BackSide,
-    depthWrite: false,
+    color, transparent: true, opacity,
+    side: THREE.BackSide, depthWrite: false,
     blending: THREE.AdditiveBlending,
   });
   scene.add(new THREE.Mesh(geo, mat));
 }
 
-// ── Inner soft glow sphere ───────────────────────
-{
-  const geo = new THREE.SphereGeometry(PLANET_R * 0.95, 24, 24);
-  const mat = new THREE.MeshBasicMaterial({
-    color: 0xff3300,
-    transparent: true,
-    opacity: 0.08,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-  });
-  scene.add(new THREE.Mesh(geo, mat));
-}
-
-// ═══════════════════════════════════════════════
-//  Rings
-// ═══════════════════════════════════════════════
-function buildRing({ r, spread, tiltX, tiltZ, count, cr, cg, cb }) {
+// ── Rings ─────────────────────────────────────────────────────────
+// Like Saturn: flat disc, two bands, particles evenly distributed radially
+function buildRing({ rMin, rMax, tiltX, tiltZ, count, cr, cg, cb }) {
   const pos = new Float32Array(count * 3);
   const col = new Float32Array(count * 3);
   const siz = new Float32Array(count);
   for (let i = 0; i < count; i++) {
     const angle = Math.random() * Math.PI * 2;
-    const rad   = r + (Math.random() - 0.5) * spread;
-    const h     = (Math.random() - 0.5) * 0.14;
+    // More particles near ring edges (denser bands)
+    const t   = Math.random();
+    const rad = rMin + t * (rMax - rMin);
+    // Very thin vertical spread (flat disc)
+    const h   = (Math.random() - 0.5) * 0.08;
+
     pos[i*3]   = rad * Math.cos(angle);
     pos[i*3+1] = h;
     pos[i*3+2] = rad * Math.sin(angle);
-    const br   = 0.5 + Math.random() * 0.5;
+
+    // Brightness varies: brighter toward inner edge
+    const edgeFactor = 1 - t * 0.5;
+    const br  = (0.55 + Math.random() * 0.45) * edgeFactor;
     col[i*3]   = cr * br;
     col[i*3+1] = cg * br;
     col[i*3+2] = cb * br;
-    siz[i]     = 1.5 + Math.random() * 3.0;
+
+    siz[i] = 1.2 + Math.random() * 2.8;
   }
-  const mesh = makePoints(pos, col, siz);
+  const mesh = buildPoints(pos, col, siz);
   mesh.rotation.x = tiltX;
   mesh.rotation.z = tiltZ;
   return mesh;
 }
 
-scene.add(buildRing({ r: 8.0,  spread: 0.55, tiltX: 0.28, tiltZ: 0.04, count: 4000, cr: 1.0,  cg: 1.0, cb: 1.0  }));
-scene.add(buildRing({ r: 10.5, spread: 0.65, tiltX: 0.42, tiltZ: 0.09, count: 3000, cr: 0.82, cg: 0.88, cb: 1.0 }));
+// Inner ring — warm white
+scene.add(buildRing({
+  rMin: PR * 1.45, rMax: PR * 2.20,
+  tiltX: 0.38, tiltZ: 0.05,
+  count: 8000, cr: 1.0, cg: 0.97, cb: 0.90,
+}));
+// Outer ring — cool white-blue, slightly different tilt
+scene.add(buildRing({
+  rMin: PR * 2.45, rMax: PR * 3.10,
+  tiltX: 0.42, tiltZ: 0.08,
+  count: 6000, cr: 0.85, cg: 0.90, cb: 1.0,
+}));
 
-// ═══════════════════════════════════════════════
-//  Starfield
-// ═══════════════════════════════════════════════
+// ── Starfield ─────────────────────────────────────────────────────
 {
   const N   = 5000;
   const pos = new Float32Array(N * 3);
@@ -270,35 +263,28 @@ scene.add(buildRing({ r: 10.5, spread: 0.65, tiltX: 0.42, tiltZ: 0.09, count: 30
   for (let i = 0; i < N; i++) {
     const u = Math.random() * 2 * Math.PI;
     const v = Math.acos(2 * Math.random() - 1);
-    const r = 130 + Math.random() * 70;
+    const r = 140 + Math.random() * 60;
     pos[i*3]   = r * Math.sin(v) * Math.cos(u);
     pos[i*3+1] = r * Math.cos(v);
     pos[i*3+2] = r * Math.sin(v) * Math.sin(u);
-    const br   = 0.35 + Math.random() * 0.65;
-    // slight color tinting for variety
-    const hue  = Math.random();
-    col[i*3]   = br * (0.9 + hue * 0.1);
-    col[i*3+1] = br * (0.9 + hue * 0.05);
-    col[i*3+2] = br * (0.9 + (1 - hue) * 0.15);
-    siz[i]     = 0.3 + Math.random() * 1.1;
+    const br = 0.3 + Math.random() * 0.7;
+    col[i*3] = col[i*3+1] = col[i*3+2] = br;
+    siz[i]   = 0.3 + Math.random() * 1.0;
   }
-  scene.add(makePoints(pos, col, siz));
+  scene.add(buildPoints(pos, col, siz));
 }
 
-// ═══════════════════════════════════════════════
-//  Gesture tracking
-// ═══════════════════════════════════════════════
+// ── Gesture state ─────────────────────────────────────────────────
 let curGesture  = 'none';
 let prevGesture = 'none';
-let gestureTime = 0;          // seconds gesture has been held
+let gestureTime = 0;
 let prevAngle   = null;
 
 const gLabel = document.getElementById('g-label');
 const gDist  = document.getElementById('g-dist');
 
-function isExtended(lm, tip, pip) {
-  return lm[tip].y < lm[pip].y;
-}
+function isExtended(lm, tip, pip) { return lm[tip].y < lm[pip].y; }
+
 function classify(lm) {
   const n = [
     isExtended(lm, 8,  6),
@@ -310,6 +296,7 @@ function classify(lm) {
   if (n >= 4) return 'open';
   return 'rotate';
 }
+
 function palmAngle(lm) {
   return Math.atan2(lm[9].y - lm[0].y, lm[9].x - lm[0].x);
 }
@@ -330,7 +317,7 @@ function onResults(res) {
       let d = a - prevAngle;
       if (d >  Math.PI) d -= Math.PI * 2;
       if (d < -Math.PI) d += Math.PI * 2;
-      camTheta -= d * 2.8;   // note: mirror flip, so negate
+      camTheta -= d * 2.8;
     }
     prevAngle = a;
   } else {
@@ -341,38 +328,30 @@ function onResults(res) {
   gLabel.textContent = labels[curGesture] || '—';
 }
 
-// ═══════════════════════════════════════════════
-//  Render loop
-// ═══════════════════════════════════════════════
+// ── Render loop ───────────────────────────────────────────────────
 const clock = new THREE.Clock();
 
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
 
-  // Track gesture duration (resets on change)
   if (curGesture !== prevGesture) gestureTime = 0;
   else gestureTime += dt;
   prevGesture = curGesture;
 
-  // ── Zoom out: ease-in (slow→fast) ────────────
+  // Zoom out — ease-in (cubic: slow → fast)
   if (curGesture === 'fist') {
-    const t      = Math.min(gestureTime / 1.8, 1.0);
-    const easeIn = t * t * t;                         // cubic ease-in
-    const speed  = 2 + easeIn * 22;                   // 2 → 24 u/s
-    camRadius = Math.min(CAM_MAX, camRadius + speed * dt);
+    const t = Math.min(gestureTime / 1.6, 1.0);
+    camRadius = Math.min(CAM_MAX, camRadius + (2 + t * t * t * 24) * dt);
   }
 
-  // ── Zoom in: ease-out (fast→slow) ────────────
+  // Zoom in — ease-out (quadratic: fast → slow)
   if (curGesture === 'open') {
-    const t       = Math.min(gestureTime / 1.8, 1.0);
-    const easeOut = 1.0 - t * t;                      // quadratic ease-out
-    const speed   = 1.5 + easeOut * 20;               // 21.5 → 1.5 u/s
-    camRadius = Math.max(CAM_MIN, camRadius - speed * dt);
+    const t = Math.min(gestureTime / 1.6, 1.0);
+    camRadius = Math.max(CAM_MIN, camRadius - (1.5 + (1 - t) * (1 - t) * 22) * dt);
   }
 
-  // Slow auto-rotation of planet body
-  if (planetMesh) planetMesh.rotation.y += 0.0012;
+  if (planetMesh) planetMesh.rotation.y += 0.0014;
 
   gDist.textContent = `dist ${camRadius.toFixed(1)}`;
   positionCam();
@@ -380,35 +359,36 @@ function animate() {
 }
 animate();
 
-// ═══════════════════════════════════════════════
-//  MediaPipe init
-// ═══════════════════════════════════════════════
-const videoEl = document.getElementById('webcam');
-const loadEl  = document.getElementById('loading');
-const loadTxt = document.getElementById('load-text');
+// ── MediaPipe ─────────────────────────────────────────────────────
+const videoEl  = document.getElementById('webcam');
+const loadEl   = document.getElementById('loading');
+const loadText = document.getElementById('load-text');
 
 const hands = new Hands({
   locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`,
 });
 hands.setOptions({
-  maxNumHands           : 1,
-  modelComplexity       : 1,
-  minDetectionConfidence: 0.7,
-  minTrackingConfidence : 0.6,
+  maxNumHands: 1, modelComplexity: 1,
+  minDetectionConfidence: 0.7, minTrackingConfidence: 0.6,
 });
 hands.onResults(onResults);
 
-loadTxt.textContent = 'Starting camera…';
-const mpCam = new Camera(videoEl, {
+loadText.textContent = 'Starting camera…';
+new Camera(videoEl, {
   onFrame: async () => { await hands.send({ image: videoEl }); },
   width: 320, height: 240,
-});
-mpCam.start()
+}).start()
   .then(() => {
-    loadTxt.textContent = 'Ready ✓';
-    setTimeout(() => { loadEl.style.opacity = '0'; setTimeout(() => loadEl.remove(), 800); }, 600);
+    loadText.textContent = 'Ready ✓';
+    setTimeout(() => {
+      loadEl.style.opacity = '0';
+      setTimeout(() => loadEl.remove(), 700);
+    }, 500);
   })
-  .catch(err => { loadTxt.textContent = 'Camera error: ' + err.message; });
+  .catch(e => {
+    loadText.textContent = 'Camera unavailable';
+    setTimeout(() => { loadEl.style.opacity = '0'; setTimeout(() => loadEl.remove(), 700); }, 1200);
+  });
 </script>
 </body>
 </html>
