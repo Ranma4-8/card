@@ -62,7 +62,7 @@
   <span id="g-label">—</span><br>
   <span id="g-dist"></span>
 </div>
-<div id="hint">✊ 握拳后退拉远 · 🖐 张手前推靠近 · 🤚 旋转手掌转动</div>
+<div id="hint">🤚 3指左右 旋转 · 🖐 5指左右 移动 · ✊ 握拳缩放</div>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
@@ -251,81 +251,93 @@ scene.add(buildRing({ rMin: PR*2.4, rMax: PR*3.0, tX: 0.40, tZ: 0.08, N: 2800, c
 }
 
 // ═══════════════════════════════════════
-//  Gesture — palm-size-based zoom
+//  Planet group (planet + rings + glow)
+//  wrapped so we can pan it as a unit
+// ═══════════════════════════════════════
+// (planet is already added to scene above;
+//  we'll drive scene.position for pan)
+let panX = 0, panY = 0;   // world-space pan offset applied to scene
+
+// ═══════════════════════════════════════
+//  Gesture state
 // ═══════════════════════════════════════
 let curGesture = 'none';
-let prevAngle  = null;     // for rotation
-let prevPalmSz = null;     // for zoom
-let zoomVel    = 0;        // positive = out, negative = in
+let prevPalmX  = null;    // screen-space palm X, for left/right tracking
+let prevPalmSz = null;    // palm size proxy for zoom
+
+let zoomVel = 0;
 
 const gLabel = document.getElementById('g-label');
 const gDist  = document.getElementById('g-dist');
 
+function palmCenterX(lm) {
+  // Mirror: webcam is mirrored, so x is already correct for screen coords
+  return lm[0].x;   // wrist x in [0,1]
+}
 function palmSize(lm) {
   const dx = lm[9].x - lm[0].x, dy = lm[9].y - lm[0].y;
   return Math.sqrt(dx * dx + dy * dy);
 }
-function palmAngle(lm) {
-  return Math.atan2(lm[9].y - lm[0].y, lm[9].x - lm[0].x);
-}
-function classify(lm) {
-  const n = [
+
+function countExtended(lm) {
+  return [
     lm[8].y  < lm[6].y,
     lm[12].y < lm[10].y,
     lm[16].y < lm[14].y,
     lm[20].y < lm[18].y,
   ].filter(Boolean).length;
-  return n <= 1 ? 'fist' : n >= 4 ? 'open' : 'rotate';
+}
+
+function classify(lm) {
+  const n = countExtended(lm);
+  if (n <= 1) return 'fist';
+  if (n === 2 || n === 3) return 'rotate';  // 3 fingers → rotate
+  return 'pan';                             // 4-5 fingers → pan
 }
 
 function onResults(res) {
   if (!res.multiHandLandmarks || !res.multiHandLandmarks.length) {
-    curGesture = 'none'; prevAngle = null; prevPalmSz = null;
+    curGesture = 'none'; prevPalmX = null; prevPalmSz = null;
     zoomVel *= 0.85;
     gLabel.textContent = '—'; return;
   }
-  const lm = res.multiHandLandmarks[0];
-  curGesture  = classify(lm);
-  const ps    = palmSize(lm);
-  const angle = palmAngle(lm);
 
-  // ── Rotation: hand angle delta → orbit theta ──
+  const lm = res.multiHandLandmarks[0];
+  curGesture = classify(lm);
+  const px   = palmCenterX(lm);
+  const ps   = palmSize(lm);
+
   if (curGesture === 'rotate') {
-    if (prevAngle !== null) {
-      let d = angle - prevAngle;
-      if (d >  Math.PI) d -= Math.PI * 2;
-      if (d < -Math.PI) d += Math.PI * 2;
-      θ -= d * 3.0;  // negate for natural mirror-flip direction
+    // 3 fingers, left/right → orbit camera (rotate planet view)
+    if (prevPalmX !== null) {
+      const dx = px - prevPalmX;    // positive = hand moved right in camera space
+      θ += dx * 8.0;               // mirror: right hand move → planet rotates right
     }
-    prevAngle  = angle;
+    prevPalmX  = px;
     prevPalmSz = ps;
 
-  // ── Fist + moving away → zoom out (ease-in) ──
+  } else if (curGesture === 'pan') {
+    // 5 fingers, left/right → translate scene
+    if (prevPalmX !== null) {
+      const dx = px - prevPalmX;
+      // Convert screen delta to world units (scale by distance)
+      panX -= dx * R * 1.8;
+    }
+    prevPalmX  = px;
+    prevPalmSz = ps;
+
   } else if (curGesture === 'fist') {
     if (prevPalmSz !== null) {
-      const shrink = prevPalmSz - ps;   // positive when hand moves back
-      if (shrink > 0.001) {
-        // Accumulate velocity (slow start → fast = ease-in)
-        zoomVel = Math.min(zoomVel + shrink * 180, 35);
-      }
+      const shrink = prevPalmSz - ps;
+      if (shrink > 0.001) zoomVel = Math.min(zoomVel + shrink * 180, 35);
     }
-    prevPalmSz = ps; prevAngle = null;
+    prevPalmSz = ps; prevPalmX = null;
 
-  // ── Open + moving toward → zoom in (ease-out) ──
-  } else if (curGesture === 'open') {
-    if (prevPalmSz !== null) {
-      const grow = ps - prevPalmSz;     // positive when hand comes closer
-      if (grow > 0.001) {
-        // Direct speed set (high initial → decays naturally = ease-out)
-        zoomVel = Math.min(zoomVel, -(grow * 140));
-      }
-    }
-    prevPalmSz = ps; prevAngle = null;
   } else {
-    prevPalmSz = ps; prevAngle = null;
+    prevPalmX = px; prevPalmSz = ps;
   }
 
-  const labels = { fist:'✊ 拉远', open:'🖐 靠近', rotate:'🤚 旋转' };
+  const labels = { fist:'✊ 缩放', rotate:'🤚 旋转 (3指)', pan:'🖐 移动 (5指)' };
   gLabel.textContent = labels[curGesture] || '—';
 }
 
@@ -351,6 +363,9 @@ function animate() {
   }
 
   if (planetMesh) planetMesh.rotation.y += 0.0013;
+
+  // Apply pan: smoothly lerp scene position toward panX
+  scene.position.x += (panX - scene.position.x) * 0.12;
 
   gDist.textContent = `dist ${R.toFixed(1)}`;
   moveCam();
