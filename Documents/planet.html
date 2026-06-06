@@ -62,7 +62,7 @@
   <span id="g-label">—</span><br>
   <span id="g-dist"></span>
 </div>
-<div id="hint">🤚 3指左右 旋转 · 🖐 5指左右 移动 · ✊ 握拳缩放</div>
+<div id="hint">🤚 3指 旋转 · ☝️ 4指 平移 · ✊ 握拳后退 拉远 · 🖐 5指前进 靠近</div>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
@@ -291,8 +291,9 @@ function countExtended(lm) {
 function classify(lm) {
   const n = countExtended(lm);
   if (n <= 1) return 'fist';
-  if (n === 2 || n === 3) return 'rotate';  // 3 fingers → rotate
-  return 'pan';                             // 4-5 fingers → pan
+  if (n === 3) return 'rotate';
+  if (n === 4) return 'pan';
+  return 'zoomin';   // 5 fingers
 }
 
 function onResults(res) {
@@ -327,9 +328,18 @@ function onResults(res) {
     prevPalmSz = ps;
 
   } else if (curGesture === 'fist') {
+    // 握拳 + 手后退 → 拉远
     if (prevPalmSz !== null) {
       const shrink = prevPalmSz - ps;
       if (shrink > 0.001) zoomVel = Math.min(zoomVel + shrink * 180, 35);
+    }
+    prevPalmSz = ps; prevPalmX = null;
+
+  } else if (curGesture === 'zoomin') {
+    // 5指 + 手前进 → 靠近
+    if (prevPalmSz !== null) {
+      const grow = ps - prevPalmSz;
+      if (grow > 0.001) zoomVel = Math.min(zoomVel, -(grow * 140));
     }
     prevPalmSz = ps; prevPalmX = null;
 
@@ -337,7 +347,7 @@ function onResults(res) {
     prevPalmX = px; prevPalmSz = ps;
   }
 
-  const labels = { fist:'✊ 缩放', rotate:'🤚 旋转 (3指)', pan:'🖐 移动 (5指)' };
+  const labels = { fist:'✊ 拉远', zoomin:'🖐 靠近 (5指)', rotate:'🤚 旋转 (3指)', pan:'☝️ 移动 (4指)' };
   gLabel.textContent = labels[curGesture] || '—';
 }
 
