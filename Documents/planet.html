@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Gesture Planet</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; overflow: hidden; }
+
+    #webcam {
+      position: fixed; bottom: 16px; right: 16px;
+      width: 160px; height: 120px;
+      border-radius: 10px;
+      opacity: 0.45;
+      transform: scaleX(-1);
+      border: 1px solid rgba(255, 130, 30, 0.25);
+      pointer-events: none;
+    }
+
+    #hud {
+      position: fixed; top: 20px; left: 24px;
+      font: 700 11px/2.2 'Courier New', monospace;
+      color: rgba(255, 155, 50, 0.55);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      pointer-events: none;
+    }
+
+    #hint {
+      position: fixed; bottom: 22px; left: 50%;
+      transform: translateX(-50%);
+      font: 11px 'Courier New', monospace;
+      color: rgba(255,255,255,0.15);
+      letter-spacing: 0.1em;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+
+    #loading {
+      position: fixed; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column; gap: 12px;
+      background: #000;
+      font: 13px 'Courier New', monospace;
+      color: rgba(255,140,40,0.6);
+      letter-spacing: 0.1em;
+      z-index: 99;
+      transition: opacity 0.8s;
+    }
+    .spinner {
+      width: 32px; height: 32px;
+      border: 2px solid rgba(255,120,30,0.2);
+      border-top-color: rgba(255,120,30,0.8);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <div id="load-text">Loading MediaPipe…</div>
+</div>
+
+<video id="webcam" autoplay playsinline muted></video>
+<div id="hud">
+  Gesture Planet<br>
+  <span id="g-label">—</span><br>
+  <span id="g-dist"></span>
+</div>
+<div id="hint">✊ 握拳拉远 · 🖐 张手靠近 · 🤚 旋转手掌</div>
+
+<!-- Three.js -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+
+<!-- MediaPipe (CDN script, exposes globals: Hands, Camera) -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════
+//  Renderer
+// ═══════════════════════════════════════════════
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x010109);
+
+const cam = new THREE.PerspectiveCamera(52, window.innerWidth / window.innerHeight, 0.1, 600);
+
+window.addEventListener('resize', () => {
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  cam.aspect = window.innerWidth / window.innerHeight;
+  cam.updateProjectionMatrix();
+});
+
+// ═══════════════════════════════════════════════
+//  Camera orbit
+// ═══════════════════════════════════════════════
+let camTheta  = 0.2;
+let camPhi    = 1.2;
+let camRadius = 20;
+const CAM_MIN = 8, CAM_MAX = 65;
+
+function positionCam() {
+  const sinP = Math.sin(camPhi), cosP = Math.cos(camPhi);
+  const sinT = Math.sin(camTheta), cosT = Math.cos(camTheta);
+  cam.position.set(camRadius * sinP * cosT, camRadius * cosP, camRadius * sinP * sinT);
+  cam.lookAt(0, 0, 0);
+}
+positionCam();
+
+// ═══════════════════════════════════════════════
+//  Shared particle shader
+// ═══════════════════════════════════════════════
+const VERT = `
+  attribute vec3  aCol;
+  attribute float aSz;
+  varying   vec3  vCol;
+  void main(){
+    vCol = aCol;
+    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+    gl_PointSize = aSz * (380.0 / -mv.z);
+    gl_Position  = projectionMatrix * mv;
+  }
+`;
+const FRAG = `
+  varying vec3 vCol;
+  void main(){
+    vec2  uv = gl_PointCoord - 0.5;
+    float d  = dot(uv, uv) * 4.0;
+    if (d > 1.0) discard;
+    float a = pow(1.0 - d, 1.6) * 0.95;
+    gl_FragColor = vec4(vCol, a);
+  }
+`;
+function particleMat() {
+  return new THREE.ShaderMaterial({
+    transparent   : true,
+    depthWrite    : false,
+    blending      : THREE.AdditiveBlending,
+    vertexShader  : VERT,
+    fragmentShader: FRAG,
+  });
+}
+function makePoints(pos, col, siz, mat) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('aCol',     new THREE.BufferAttribute(col, 3));
+  geo.setAttribute('aSz',      new THREE.BufferAttribute(siz, 1));
+  return new THREE.Points(geo, mat || particleMat());
+}
+
+// ═══════════════════════════════════════════════
+//  Planet
+// ═══════════════════════════════════════════════
+const PLANET_R = 5;
+let planetMesh;
+
+(function buildPlanet() {
+  const N   = 16000;
+  const pos = new Float32Array(N * 3);
+  const col = new Float32Array(N * 3);
+  const siz = new Float32Array(N);
+
+  for (let i = 0; i < N; i++) {
+    // Radial distribution: dense shell + inner volume + thin haze
+    const t = Math.random();
+    let r;
+    if      (t < 0.70) r = PLANET_R * (0.87 + Math.random() * 0.20);   // surface
+    else if (t < 0.90) r = PLANET_R * Math.pow(Math.random(), 0.5);     // interior
+    else               r = PLANET_R * (1.07 + Math.random() * 0.28);    // haze
+
+    const u = Math.random() * 2 * Math.PI;
+    const v = Math.acos(2 * Math.random() - 1);
+    pos[i*3]   = r * Math.sin(v) * Math.cos(u);
+    pos[i*3+1] = r * Math.cos(v);
+    pos[i*3+2] = r * Math.sin(v) * Math.sin(u);
+
+    // Color ramp: deep magenta-red → orange → warm yellow-white at rim
+    const n = Math.min(r / PLANET_R, 1.3);
+    const rr = 1.0;
+    const gg = Math.pow(Math.max(0, n - 0.05), 0.55) * 0.62;
+    const bb = Math.max(0, n - 0.85) * 0.45;
+    col[i*3]   = rr;
+    col[i*3+1] = gg;
+    col[i*3+2] = bb;
+
+    const onSurface = t < 0.70;
+    siz[i] = onSurface ? (2.2 + Math.random() * 3.8) : (0.5 + Math.random() * 2.0);
+  }
+
+  planetMesh = makePoints(pos, col, siz);
+  planetMesh.name = 'planet';
+  scene.add(planetMesh);
+})();
+
+// ── Atmosphere glow ──────────────────────────────
+{
+  const geo = new THREE.SphereGeometry(PLANET_R * 1.45, 32, 32);
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xff5500,
+    transparent: true,
+    opacity: 0.055,
+    side: THREE.BackSide,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  scene.add(new THREE.Mesh(geo, mat));
+}
+
+// ── Inner soft glow sphere ───────────────────────
+{
+  const geo = new THREE.SphereGeometry(PLANET_R * 0.95, 24, 24);
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xff3300,
+    transparent: true,
+    opacity: 0.08,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  scene.add(new THREE.Mesh(geo, mat));
+}
+
+// ═══════════════════════════════════════════════
+//  Rings
+// ═══════════════════════════════════════════════
+function buildRing({ r, spread, tiltX, tiltZ, count, cr, cg, cb }) {
+  const pos = new Float32Array(count * 3);
+  const col = new Float32Array(count * 3);
+  const siz = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const rad   = r + (Math.random() - 0.5) * spread;
+    const h     = (Math.random() - 0.5) * 0.14;
+    pos[i*3]   = rad * Math.cos(angle);
+    pos[i*3+1] = h;
+    pos[i*3+2] = rad * Math.sin(angle);
+    const br   = 0.5 + Math.random() * 0.5;
+    col[i*3]   = cr * br;
+    col[i*3+1] = cg * br;
+    col[i*3+2] = cb * br;
+    siz[i]     = 1.5 + Math.random() * 3.0;
+  }
+  const mesh = makePoints(pos, col, siz);
+  mesh.rotation.x = tiltX;
+  mesh.rotation.z = tiltZ;
+  return mesh;
+}
+
+scene.add(buildRing({ r: 8.0,  spread: 0.55, tiltX: 0.28, tiltZ: 0.04, count: 4000, cr: 1.0,  cg: 1.0, cb: 1.0  }));
+scene.add(buildRing({ r: 10.5, spread: 0.65, tiltX: 0.42, tiltZ: 0.09, count: 3000, cr: 0.82, cg: 0.88, cb: 1.0 }));
+
+// ═══════════════════════════════════════════════
+//  Starfield
+// ═══════════════════════════════════════════════
+{
+  const N   = 5000;
+  const pos = new Float32Array(N * 3);
+  const col = new Float32Array(N * 3);
+  const siz = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    const u = Math.random() * 2 * Math.PI;
+    const v = Math.acos(2 * Math.random() - 1);
+    const r = 130 + Math.random() * 70;
+    pos[i*3]   = r * Math.sin(v) * Math.cos(u);
+    pos[i*3+1] = r * Math.cos(v);
+    pos[i*3+2] = r * Math.sin(v) * Math.sin(u);
+    const br   = 0.35 + Math.random() * 0.65;
+    // slight color tinting for variety
+    const hue  = Math.random();
+    col[i*3]   = br * (0.9 + hue * 0.1);
+    col[i*3+1] = br * (0.9 + hue * 0.05);
+    col[i*3+2] = br * (0.9 + (1 - hue) * 0.15);
+    siz[i]     = 0.3 + Math.random() * 1.1;
+  }
+  scene.add(makePoints(pos, col, siz));
+}
+
+// ═══════════════════════════════════════════════
+//  Gesture tracking
+// ═══════════════════════════════════════════════
+let curGesture  = 'none';
+let prevGesture = 'none';
+let gestureTime = 0;          // seconds gesture has been held
+let prevAngle   = null;
+
+const gLabel = document.getElementById('g-label');
+const gDist  = document.getElementById('g-dist');
+
+function isExtended(lm, tip, pip) {
+  return lm[tip].y < lm[pip].y;
+}
+function classify(lm) {
+  const n = [
+    isExtended(lm, 8,  6),
+    isExtended(lm, 12, 10),
+    isExtended(lm, 16, 14),
+    isExtended(lm, 20, 18),
+  ].filter(Boolean).length;
+  if (n <= 1) return 'fist';
+  if (n >= 4) return 'open';
+  return 'rotate';
+}
+function palmAngle(lm) {
+  return Math.atan2(lm[9].y - lm[0].y, lm[9].x - lm[0].x);
+}
+
+function onResults(res) {
+  if (!res.multiHandLandmarks || res.multiHandLandmarks.length === 0) {
+    curGesture = 'none';
+    prevAngle  = null;
+    gLabel.textContent = '—';
+    return;
+  }
+  const lm = res.multiHandLandmarks[0];
+  curGesture = classify(lm);
+
+  if (curGesture === 'rotate') {
+    const a = palmAngle(lm);
+    if (prevAngle !== null) {
+      let d = a - prevAngle;
+      if (d >  Math.PI) d -= Math.PI * 2;
+      if (d < -Math.PI) d += Math.PI * 2;
+      camTheta -= d * 2.8;   // note: mirror flip, so negate
+    }
+    prevAngle = a;
+  } else {
+    prevAngle = null;
+  }
+
+  const labels = { fist: '✊ 拉远', open: '🖐 靠近', rotate: '🤚 旋转' };
+  gLabel.textContent = labels[curGesture] || '—';
+}
+
+// ═══════════════════════════════════════════════
+//  Render loop
+// ═══════════════════════════════════════════════
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+
+  // Track gesture duration (resets on change)
+  if (curGesture !== prevGesture) gestureTime = 0;
+  else gestureTime += dt;
+  prevGesture = curGesture;
+
+  // ── Zoom out: ease-in (slow→fast) ────────────
+  if (curGesture === 'fist') {
+    const t      = Math.min(gestureTime / 1.8, 1.0);
+    const easeIn = t * t * t;                         // cubic ease-in
+    const speed  = 2 + easeIn * 22;                   // 2 → 24 u/s
+    camRadius = Math.min(CAM_MAX, camRadius + speed * dt);
+  }
+
+  // ── Zoom in: ease-out (fast→slow) ────────────
+  if (curGesture === 'open') {
+    const t       = Math.min(gestureTime / 1.8, 1.0);
+    const easeOut = 1.0 - t * t;                      // quadratic ease-out
+    const speed   = 1.5 + easeOut * 20;               // 21.5 → 1.5 u/s
+    camRadius = Math.max(CAM_MIN, camRadius - speed * dt);
+  }
+
+  // Slow auto-rotation of planet body
+  if (planetMesh) planetMesh.rotation.y += 0.0012;
+
+  gDist.textContent = `dist ${camRadius.toFixed(1)}`;
+  positionCam();
+  renderer.render(scene, cam);
+}
+animate();
+
+// ═══════════════════════════════════════════════
+//  MediaPipe init
+// ═══════════════════════════════════════════════
+const videoEl = document.getElementById('webcam');
+const loadEl  = document.getElementById('loading');
+const loadTxt = document.getElementById('load-text');
+
+const hands = new Hands({
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`,
+});
+hands.setOptions({
+  maxNumHands           : 1,
+  modelComplexity       : 1,
+  minDetectionConfidence: 0.7,
+  minTrackingConfidence : 0.6,
+});
+hands.onResults(onResults);
+
+loadTxt.textContent = 'Starting camera…';
+const mpCam = new Camera(videoEl, {
+  onFrame: async () => { await hands.send({ image: videoEl }); },
+  width: 320, height: 240,
+});
+mpCam.start()
+  .then(() => {
+    loadTxt.textContent = 'Ready ✓';
+    setTimeout(() => { loadEl.style.opacity = '0'; setTimeout(() => loadEl.remove(), 800); }, 600);
+  })
+  .catch(err => { loadTxt.textContent = 'Camera error: ' + err.message; });
+</script>
+</body>
+</html>
