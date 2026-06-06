@@ -184,9 +184,7 @@ let planetMesh;
     col[i*3+1] = gg * br;
     col[i*3+2] = bb * br;
 
-    siz[i] = roll < 0.80 ? (1.8 + Math.random() * 2.8)   // surface: larger
-           : roll < 0.94 ? (0.8 + Math.random() * 1.5)   // interior: smaller
-           :               (1.2 + Math.random() * 2.0);   // haze
+    siz[i] = 0.4 + Math.random() * 1.1;
   }
 
   planetMesh = pts(pos, col, siz, matPlanet);
